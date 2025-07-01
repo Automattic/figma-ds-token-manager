@@ -6,6 +6,8 @@ import "./App.css";
 
 import type { ParsedToken } from "../types";
 
+const VAR_PREFIX = "--wpds-color-";
+
 function App() {
   const inputRef = useRef<HTMLInputElement>(null);
 
@@ -24,17 +26,17 @@ function App() {
       const toRgb = converter("rgb");
 
       root.walkRules((rule) => {
+        // Ignore media queries (for modern color gamuts)
         const parentAtRule =
           rule.parent?.type === "atrule" ? rule.parent.name : null;
         if (parentAtRule === "media") return;
-        if (rule.selector?.includes('[data-wpds-color-scheme="light"')) return;
+        // Ignore light color scheme variables (same as defaults)
+        if (rule.selector?.includes("light")) return;
 
-        const isDark = rule.selector?.includes(
-          '[data-wpds-color-scheme="dark"]'
-        );
+        const isDark = rule.selector?.includes("dark");
 
         rule.walkDecls((decl) => {
-          if (!decl.prop.startsWith("--wpds-color-")) return;
+          if (!decl.prop.startsWith(VAR_PREFIX)) return;
           const value = decl.value.trim();
           const parsed = parse(value);
           const rgb =
@@ -69,7 +71,7 @@ function App() {
 
   return (
     <main>
-      <h2>WPDS Token Manager</h2>
+      <h2>DS Token Manager</h2>
 
       <section>
         <label htmlFor="input">Select a CSS file</label>
