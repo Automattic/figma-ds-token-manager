@@ -6,68 +6,93 @@ figma.ui.onmessage = async (msg) => {
   if (msg.type === "import-tokens") {
     const parsedTokens: Record<string, ParsedToken> = msg.parsedTokens;
     const collectionName = "WPDS Colors";
-    // Remove existing collection
+
+    // Get or create collection
     const collections =
       await figma.variables.getLocalVariableCollectionsAsync();
-    const existing = collections.find((c) => c.name === collectionName);
+    let collection = collections.find((c) => c.name === collectionName);
 
-    if (existing) {
-      for (const v of await figma.variables.getLocalVariablesAsync()) {
-        if (v.variableCollectionId === existing.id) {
-          v.remove();
-        }
-      }
-      existing.remove();
+    if (!collection) {
+      collection = figma.variables.createVariableCollection(collectionName);
+      collection.renameMode(collection.modes[0].modeId, "light");
+      collection.addMode("dark");
     }
-    const collection = figma.variables.createVariableCollection(collectionName);
-    collection.renameMode(collection.modes[0].modeId, "light");
+
     const lightModeId = collection.modes[0].modeId;
-    const darkModeId = collection.addMode("dark");
+    const darkModeId = collection.modes[1]
+      ? collection.modes[1].modeId
+      : collection.addMode("dark");
+
+    // Get existing variables in the collection
+    const existingVariables = await figma.variables.getLocalVariablesAsync();
+    const collectionVariables = existingVariables.filter(
+      (v) => v.variableCollectionId === collection.id
+    );
+    const existingVariableMap: Record<string, Variable> = {};
+
+    collectionVariables.forEach((variable) => {
+      existingVariableMap[variable.name] = variable;
+    });
 
     const created: Record<string, Variable> = {};
+    const updatedVariables: Record<string, boolean> = {};
 
-    // Pass 1: create all direct value variables
+    // Pass 1: create or update all direct value variables
     for (const [name, data] of Object.entries(parsedTokens)) {
-      // Set a light mode value (which should always exist)
       const lightData = data.light;
+      const variableName = name.replace(/^--/, "");
 
       if (lightData.value.startsWith("var(")) continue;
       if (!lightData.rgb) continue;
 
-      const variable = figma.variables.createVariable(
-        name.replace(/^--/, ""),
-        collection,
-        "COLOR"
-      );
-      variable.setValueForMode(lightModeId, lightData.rgb);
-      variable.scopes = [];
-      created[name] = variable;
+      let variable = existingVariableMap[variableName];
 
-      // Optionally set a dark mode value (if it exists).
+      if (!variable) {
+        // Create new variable
+        variable = figma.variables.createVariable(
+          variableName,
+          collection,
+          "COLOR"
+        );
+        variable.scopes = [];
+      }
+
+      // Update values
+      variable.setValueForMode(lightModeId, lightData.rgb);
+
+      // Optionally set a dark mode value (if it exists)
       const darkData = data.dark;
-      if (darkData.value.startsWith("var(")) continue;
-      if (!darkData.rgb) continue;
-      variable.setValueForMode(darkModeId, darkData.rgb);
-      // }
+      if (!darkData.value.startsWith("var(") && darkData.rgb) {
+        variable.setValueForMode(darkModeId, darkData.rgb);
+      }
+
+      created[name] = variable;
+      updatedVariables[variableName] = true;
     }
 
-    // Pass 2: create aliases
+    // Pass 2: create or update aliases
     for (const [name, data] of Object.entries(parsedTokens)) {
       const lightData = data.light;
+      const variableName = name.replace(/^--/, "");
 
       if (!lightData.value.startsWith("var(")) continue;
       const match = /var\(\s*(--[\w-]+)\s*\)/.exec(lightData.value);
       const refName = match && match[1];
       if (!refName || !created[refName]) continue;
 
-      const variable = figma.variables.createVariable(
-        name.replace(/^--/, ""),
-        collection,
-        "COLOR"
-      );
-      // Assume that both dark and light keep referring the same aliases
-      // both in light and dark mode — it's the underlying aliased variables
-      // that changed between modes.
+      let variable = existingVariableMap[variableName];
+
+      if (!variable) {
+        // Create new variable
+        variable = figma.variables.createVariable(
+          variableName,
+          collection,
+          "COLOR"
+        );
+        variable.scopes = [];
+      }
+
+      // Update alias references
       variable.setValueForMode(lightModeId, {
         type: "VARIABLE_ALIAS",
         id: created[refName].id,
@@ -77,7 +102,7 @@ figma.ui.onmessage = async (msg) => {
         id: created[refName].id,
       });
 
-      variable.scopes = [];
+      // Update scopes
       if (/text/.test(name)) {
         variable.scopes = ["TEXT_FILL"];
       } else if (/border/.test(name)) {
@@ -87,6 +112,16 @@ figma.ui.onmessage = async (msg) => {
       }
 
       created[name] = variable;
+      updatedVariables[variableName] = true;
+    }
+
+    // Clean up variables that weren't updated (no longer in the import)
+    for (const [variableName, variable] of Object.entries(
+      existingVariableMap
+    )) {
+      if (!updatedVariables[variableName]) {
+        variable.remove();
+      }
     }
   }
 
