@@ -1,128 +1,167 @@
 import type { ParsedToken } from "../types";
 
+function filterObjectByKey<T extends object>(
+  obj: T,
+  predicate: (key: keyof T) => boolean
+) {
+  return Object.keys(obj).reduce((acc, key) => {
+    const keyAsKeyofT = key as keyof T;
+    if (predicate(keyAsKeyofT)) {
+      acc[keyAsKeyofT] = obj[keyAsKeyofT];
+    }
+    return acc;
+  }, {} as T);
+}
+
 figma.showUI(__html__, { themeColors: true, height: 300 });
+
+// Useful to track all variables created during the import, so that we can
+// alias variables correctly.
+const allImportedVariables: Record<string, Variable> = {};
+
+async function updateCollection(args: {
+  tokens: Record<string, ParsedToken>;
+  collectionName: string;
+  hiddenFromPublishing?: boolean;
+}) {
+  // Useful to avoid trashing and re-creating the same variables (and instead
+  // just updating them), so that references don't get lost.
+  const variablesInCollectionBeforeImporting: Record<string, Variable> = {};
+  // Useful to track which variables were not updated during the import, so we
+  // can clean them up and avoid stale variables lingering around.
+  const variablesUpdatedDuringImport: Record<string, boolean> = {};
+
+  const { tokens, collectionName, hiddenFromPublishing = false } = args;
+
+  // Get or create collection
+  const collections = await figma.variables.getLocalVariableCollectionsAsync();
+  let collection = collections.find((c) => c.name === collectionName);
+
+  if (!collection) {
+    collection = figma.variables.createVariableCollection(collectionName);
+    collection.renameMode(collection.modes[0].modeId, "light");
+    collection.addMode("dark");
+  }
+
+  collection.hiddenFromPublishing = hiddenFromPublishing;
+
+  const lightModeId = collection.modes[0].modeId;
+  const darkModeId = collection.modes[1]
+    ? collection.modes[1].modeId
+    : collection.addMode("dark");
+
+  // Get existing variables in the collection
+  (await figma.variables.getLocalVariablesAsync())
+    .filter((v) => v.variableCollectionId === collection.id)
+    .forEach((variable) => {
+      variablesInCollectionBeforeImporting[variable.name] = variable;
+    });
+
+  // Pass 1: create or update all direct value variables
+  for (const [name, data] of Object.entries(tokens)) {
+    const lightData = data.light;
+    const variableName = name.replace(/^--/, "");
+
+    if (lightData.value.startsWith("var(")) continue;
+    if (!lightData.rgb) continue;
+
+    let variable = variablesInCollectionBeforeImporting[variableName];
+
+    if (!variable) {
+      // Create new variable
+      variable = figma.variables.createVariable(
+        variableName,
+        collection,
+        "COLOR"
+      );
+      variable.scopes = [];
+    }
+
+    variable.hiddenFromPublishing = hiddenFromPublishing;
+
+    // Update values
+    variable.setValueForMode(lightModeId, lightData.rgb);
+
+    // Optionally set a dark mode value (if it exists)
+    const darkData = data.dark;
+    if (!darkData.value.startsWith("var(") && darkData.rgb) {
+      variable.setValueForMode(darkModeId, darkData.rgb);
+    }
+
+    allImportedVariables[name] = variable;
+    variablesUpdatedDuringImport[variableName] = true;
+  }
+
+  // Pass 2: create or update aliases
+  for (const [name, data] of Object.entries(tokens)) {
+    const lightData = data.light;
+    const variableName = name.replace(/^--/, "");
+
+    if (!lightData.value.startsWith("var(")) continue;
+    const match = /var\(\s*(--[\w-]+)\s*\)/.exec(lightData.value);
+    const refName = match && match[1];
+    if (!refName || !allImportedVariables[refName]) continue;
+
+    let variable = variablesInCollectionBeforeImporting[variableName];
+
+    if (!variable) {
+      // Create new variable
+      variable = figma.variables.createVariable(
+        variableName,
+        collection,
+        "COLOR"
+      );
+      variable.scopes = [];
+    }
+
+    variable.hiddenFromPublishing = hiddenFromPublishing;
+
+    // Update alias references
+    variable.setValueForMode(lightModeId, {
+      type: "VARIABLE_ALIAS",
+      id: allImportedVariables[refName].id,
+    });
+    variable.setValueForMode(darkModeId, {
+      type: "VARIABLE_ALIAS",
+      id: allImportedVariables[refName].id,
+    });
+
+    // Update scopes
+    if (/fg/.test(name)) {
+      variable.scopes = ["TEXT_FILL", "SHAPE_FILL"];
+    } else if (/stroke/.test(name)) {
+      variable.scopes = ["STROKE_COLOR", "EFFECT_COLOR"];
+    } else if (/bg/.test(name)) {
+      variable.scopes = ["FRAME_FILL", "SHAPE_FILL"];
+    }
+
+    allImportedVariables[name] = variable;
+    variablesUpdatedDuringImport[variableName] = true;
+  }
+
+  // Clean up variables that weren't updated (no longer in the import)
+  for (const [variableName, variable] of Object.entries(
+    variablesInCollectionBeforeImporting
+  )) {
+    if (!variablesUpdatedDuringImport[variableName]) {
+      variable.remove();
+    }
+  }
+}
 
 figma.ui.onmessage = async (msg) => {
   if (msg.type === "import-tokens") {
     const parsedTokens: Record<string, ParsedToken> = msg.parsedTokens;
-    const collectionName = "WPDS Colors";
 
-    // Get or create collection
-    const collections =
-      await figma.variables.getLocalVariableCollectionsAsync();
-    let collection = collections.find((c) => c.name === collectionName);
-
-    if (!collection) {
-      collection = figma.variables.createVariableCollection(collectionName);
-      collection.renameMode(collection.modes[0].modeId, "light");
-      collection.addMode("dark");
-    }
-
-    const lightModeId = collection.modes[0].modeId;
-    const darkModeId = collection.modes[1]
-      ? collection.modes[1].modeId
-      : collection.addMode("dark");
-
-    // Get existing variables in the collection
-    const existingVariables = await figma.variables.getLocalVariablesAsync();
-    const collectionVariables = existingVariables.filter(
-      (v) => v.variableCollectionId === collection.id
-    );
-    const existingVariableMap: Record<string, Variable> = {};
-
-    collectionVariables.forEach((variable) => {
-      existingVariableMap[variable.name] = variable;
+    await updateCollection({
+      tokens: filterObjectByKey(parsedTokens, (key) => /private/.test(key)),
+      collectionName: "_WPDS Primitives",
+      hiddenFromPublishing: true,
     });
-
-    const created: Record<string, Variable> = {};
-    const updatedVariables: Record<string, boolean> = {};
-
-    // Pass 1: create or update all direct value variables
-    for (const [name, data] of Object.entries(parsedTokens)) {
-      const lightData = data.light;
-      const variableName = name.replace(/^--/, "");
-
-      if (lightData.value.startsWith("var(")) continue;
-      if (!lightData.rgb) continue;
-
-      let variable = existingVariableMap[variableName];
-
-      if (!variable) {
-        // Create new variable
-        variable = figma.variables.createVariable(
-          variableName,
-          collection,
-          "COLOR"
-        );
-        variable.scopes = [];
-      }
-
-      // Update values
-      variable.setValueForMode(lightModeId, lightData.rgb);
-
-      // Optionally set a dark mode value (if it exists)
-      const darkData = data.dark;
-      if (!darkData.value.startsWith("var(") && darkData.rgb) {
-        variable.setValueForMode(darkModeId, darkData.rgb);
-      }
-
-      created[name] = variable;
-      updatedVariables[variableName] = true;
-    }
-
-    // Pass 2: create or update aliases
-    for (const [name, data] of Object.entries(parsedTokens)) {
-      const lightData = data.light;
-      const variableName = name.replace(/^--/, "");
-
-      if (!lightData.value.startsWith("var(")) continue;
-      const match = /var\(\s*(--[\w-]+)\s*\)/.exec(lightData.value);
-      const refName = match && match[1];
-      if (!refName || !created[refName]) continue;
-
-      let variable = existingVariableMap[variableName];
-
-      if (!variable) {
-        // Create new variable
-        variable = figma.variables.createVariable(
-          variableName,
-          collection,
-          "COLOR"
-        );
-        variable.scopes = [];
-      }
-
-      // Update alias references
-      variable.setValueForMode(lightModeId, {
-        type: "VARIABLE_ALIAS",
-        id: created[refName].id,
-      });
-      variable.setValueForMode(darkModeId, {
-        type: "VARIABLE_ALIAS",
-        id: created[refName].id,
-      });
-
-      // Update scopes
-      if (/text/.test(name)) {
-        variable.scopes = ["TEXT_FILL"];
-      } else if (/border/.test(name)) {
-        variable.scopes = ["STROKE_COLOR", "EFFECT_COLOR"];
-      } else if (/bg/.test(name)) {
-        variable.scopes = ["FRAME_FILL", "SHAPE_FILL"];
-      }
-
-      created[name] = variable;
-      updatedVariables[variableName] = true;
-    }
-
-    // Clean up variables that weren't updated (no longer in the import)
-    for (const [variableName, variable] of Object.entries(
-      existingVariableMap
-    )) {
-      if (!updatedVariables[variableName]) {
-        variable.remove();
-      }
-    }
+    await updateCollection({
+      tokens: filterObjectByKey(parsedTokens, (key) => !/private/.test(key)),
+      collectionName: "WPDS Tokens",
+    });
   }
 
   figma.closePlugin();
