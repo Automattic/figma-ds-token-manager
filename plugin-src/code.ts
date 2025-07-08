@@ -19,6 +19,47 @@ figma.showUI(__html__, { themeColors: true, height: 300 });
 // alias variables correctly.
 const allImportedVariables: Record<string, Variable> = {};
 
+function computeNameForVariable(parsedTokenName: string) {
+  let variableName = parsedTokenName.replace(/^--/, "");
+
+  const folderSegments = [];
+
+  if (/color-/.test(variableName)) {
+    folderSegments.push("Color");
+
+    if (/fg/.test(variableName)) {
+      folderSegments.push("Foreground");
+    } else if (/bg/.test(variableName)) {
+      folderSegments.push("Background");
+    } else if (/stroke/.test(variableName)) {
+      folderSegments.push("Stroke");
+    } else {
+      // There shouldn't be any other color variables, but just in case.
+      folderSegments.push("Other");
+    }
+
+    if (/(brand|primary)/.test(variableName)) {
+      folderSegments.push("Brand");
+    } else if (/success/.test(variableName)) {
+      folderSegments.push("Success");
+    } else if (/info/.test(variableName)) {
+      folderSegments.push("Info");
+    } else if (/warning/.test(variableName)) {
+      folderSegments.push("Warning");
+    } else if (/error/.test(variableName)) {
+      folderSegments.push("Error");
+    } else {
+      folderSegments.push("Neutral");
+    }
+  }
+
+  // Avoid adding '/' if there are no folder segments
+  const folderPrefix =
+    folderSegments.length > 0 ? `${folderSegments.join("/")}/` : "";
+
+  return `${folderPrefix}${variableName}`;
+}
+
 async function updateCollection(args: {
   tokens: Record<string, ParsedToken>;
   collectionName: string;
@@ -60,7 +101,7 @@ async function updateCollection(args: {
   // Pass 1: create or update all direct value variables
   for (const [name, data] of Object.entries(tokens)) {
     const lightData = data.light;
-    const variableName = name.replace(/^--/, "");
+    const variableName = computeNameForVariable(name);
 
     if (lightData.value.startsWith("var(")) continue;
     if (!lightData.rgb) continue;
@@ -95,7 +136,7 @@ async function updateCollection(args: {
   // Pass 2: create or update aliases
   for (const [name, data] of Object.entries(tokens)) {
     const lightData = data.light;
-    const variableName = name.replace(/^--/, "");
+    const variableName = computeNameForVariable(name);
 
     if (!lightData.value.startsWith("var(")) continue;
     const match = /var\(\s*(--[\w-]+)\s*\)/.exec(lightData.value);
