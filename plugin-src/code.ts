@@ -1,18 +1,5 @@
 import type { ParsedToken } from "../types";
 
-function filterObjectByKey<T extends object>(
-  obj: T,
-  predicate: (key: keyof T) => boolean
-) {
-  return Object.keys(obj).reduce((acc, key) => {
-    const keyAsKeyofT = key as keyof T;
-    if (predicate(keyAsKeyofT)) {
-      acc[keyAsKeyofT] = obj[keyAsKeyofT];
-    }
-    return acc;
-  }, {} as T);
-}
-
 figma.showUI(__html__, { themeColors: true, height: 300 });
 
 // Useful to track all variables created during the import, so that we can
@@ -20,36 +7,64 @@ figma.showUI(__html__, { themeColors: true, height: 300 });
 const allImportedVariables: Record<string, Variable> = {};
 
 function computeNameForVariable(parsedTokenName: string) {
-  let variableName = parsedTokenName.replace(/^--/, "");
+  let variableName = parsedTokenName
+    // Remove the --wpds- prefix (replaced by the collection name)
+    .replace(/^--wpds-/, "")
+    // Abbreviate bg segments to 3 characters.
+    .replace(/(.*)-bg-(\w+)(.*)/, (_, p1, p2, p3) => {
+      return `${p1}-bg-${p2.slice(0, 3)}${p3}`;
+    });
 
   const folderSegments = [];
 
   if (/color-/.test(variableName)) {
+    // Remove the color- prefix (replaced by the folder path)
+    variableName = variableName.replace(/^color-/, "");
     folderSegments.push("Color");
 
-    if (/fg/.test(variableName)) {
-      folderSegments.push("Foreground");
-    } else if (/bg/.test(variableName)) {
-      folderSegments.push("Background");
-    } else if (/stroke/.test(variableName)) {
-      folderSegments.push("Stroke");
-    } else {
-      // There shouldn't be any other color variables, but just in case.
-      folderSegments.push("Other");
-    }
+    if (/private/.test(variableName)) {
+      folderSegments.push("_Primitives");
 
-    if (/(brand|primary)/.test(variableName)) {
-      folderSegments.push("Brand");
-    } else if (/success/.test(variableName)) {
-      folderSegments.push("Success");
-    } else if (/info/.test(variableName)) {
-      folderSegments.push("Info");
-    } else if (/warning/.test(variableName)) {
-      folderSegments.push("Warning");
-    } else if (/error/.test(variableName)) {
-      folderSegments.push("Error");
+      if (/primary/.test(variableName)) {
+        folderSegments.push("primary");
+      } else if (/success/.test(variableName)) {
+        folderSegments.push("Success");
+      } else if (/info/.test(variableName)) {
+        folderSegments.push("Info");
+      } else if (/warning/.test(variableName)) {
+        folderSegments.push("Warning");
+      } else if (/error/.test(variableName)) {
+        folderSegments.push("Error");
+      } else {
+        folderSegments.push("Neutral");
+      }
+
+      variableName = variableName.split("-").slice(-1)[0];
     } else {
-      folderSegments.push("Neutral");
+      if (/fg/.test(variableName)) {
+        folderSegments.push("Foreground");
+      } else if (/bg/.test(variableName)) {
+        folderSegments.push("Background");
+      } else if (/stroke/.test(variableName)) {
+        folderSegments.push("Stroke");
+      } else {
+        // There shouldn't be any other color variables, but just in case.
+        folderSegments.push("Other");
+      }
+
+      if (/brand/.test(variableName)) {
+        folderSegments.push("Brand");
+      } else if (/success/.test(variableName)) {
+        folderSegments.push("Success");
+      } else if (/info/.test(variableName)) {
+        folderSegments.push("Info");
+      } else if (/warning/.test(variableName)) {
+        folderSegments.push("Warning");
+      } else if (/error/.test(variableName)) {
+        folderSegments.push("Error");
+      } else {
+        folderSegments.push("Neutral");
+      }
     }
   }
 
@@ -63,7 +78,6 @@ function computeNameForVariable(parsedTokenName: string) {
 async function updateCollection(args: {
   tokens: Record<string, ParsedToken>;
   collectionName: string;
-  hiddenFromPublishing?: boolean;
 }) {
   // Useful to avoid trashing and re-creating the same variables (and instead
   // just updating them), so that references don't get lost.
@@ -72,7 +86,7 @@ async function updateCollection(args: {
   // can clean them up and avoid stale variables lingering around.
   const variablesUpdatedDuringImport: Record<string, boolean> = {};
 
-  const { tokens, collectionName, hiddenFromPublishing = false } = args;
+  const { tokens, collectionName } = args;
 
   // Get or create collection
   const collections = await figma.variables.getLocalVariableCollectionsAsync();
@@ -83,8 +97,6 @@ async function updateCollection(args: {
     collection.renameMode(collection.modes[0].modeId, "light");
     collection.addMode("dark");
   }
-
-  collection.hiddenFromPublishing = hiddenFromPublishing;
 
   const lightModeId = collection.modes[0].modeId;
   const darkModeId = collection.modes[1]
@@ -115,10 +127,11 @@ async function updateCollection(args: {
         collection,
         "COLOR"
       );
-      variable.scopes = [];
     }
 
-    variable.hiddenFromPublishing = hiddenFromPublishing;
+    // Values holding raw values should not be used directly, or published.
+    variable.scopes = [];
+    variable.hiddenFromPublishing = true;
 
     // Update values
     variable.setValueForMode(lightModeId, lightData.rgb);
@@ -152,10 +165,7 @@ async function updateCollection(args: {
         collection,
         "COLOR"
       );
-      variable.scopes = [];
     }
-
-    variable.hiddenFromPublishing = hiddenFromPublishing;
 
     // Update alias references
     variable.setValueForMode(lightModeId, {
@@ -174,6 +184,8 @@ async function updateCollection(args: {
       variable.scopes = ["STROKE_COLOR", "EFFECT_COLOR"];
     } else if (/bg/.test(name)) {
       variable.scopes = ["FRAME_FILL", "SHAPE_FILL"];
+    } else {
+      variable.scopes = [];
     }
 
     allImportedVariables[name] = variable;
@@ -195,12 +207,7 @@ figma.ui.onmessage = async (msg) => {
     const parsedTokens: Record<string, ParsedToken> = msg.parsedTokens;
 
     await updateCollection({
-      tokens: filterObjectByKey(parsedTokens, (key) => /private/.test(key)),
-      collectionName: "_WPDS Primitives",
-      hiddenFromPublishing: true,
-    });
-    await updateCollection({
-      tokens: filterObjectByKey(parsedTokens, (key) => !/private/.test(key)),
+      tokens: parsedTokens,
       collectionName: "WPDS Tokens",
     });
   }
