@@ -51,7 +51,13 @@ function App() {
 
           parsedTokens[decl.prop][isDark ? "dark" : "light"] = {
             value,
-            rgb: rgb ? { r: rgb.r, g: rgb.g, b: rgb.b } : undefined,
+            rgb: rgb
+              ? {
+                  r: Math.max(Math.min(rgb.r, 1), 0),
+                  g: Math.max(Math.min(rgb.g, 1), 0),
+                  b: Math.max(Math.min(rgb.b, 1), 0),
+                }
+              : undefined,
           };
         });
       });
