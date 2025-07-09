@@ -1,12 +1,10 @@
 import { useRef } from "react";
-import postcss from "postcss";
-import safeParser from "postcss-safe-parser";
-import { parse, converter } from "culori";
+import { converter } from "culori";
 import "./App.css";
 
-import type { ParsedToken } from "../types";
+import type { ImportedTokens, ParsedTokens, ParsedTokenValue } from "../types";
 
-const VAR_PREFIX = "--wpds-color-";
+const rgb = converter("rgb");
 
 function App() {
   const inputRef = useRef<HTMLInputElement>(null);
@@ -18,49 +16,54 @@ function App() {
     const reader = new FileReader();
 
     reader.onload = async (event) => {
-      const css = event.target?.result as string;
-      const result = await postcss().process(css, { parser: safeParser });
-      const root = result.root;
+      const tokens = JSON.parse(
+        event.target?.result as string
+      ) as ImportedTokens;
 
-      const parsedTokens: Record<string, ParsedToken> = {};
-      const toRgb = converter("rgb");
+      const parsedTokens: ParsedTokens = {};
 
-      root.walkRules((rule) => {
-        // Ignore media queries (for modern color gamuts)
-        const parentAtRule =
-          rule.parent?.type === "atrule" ? rule.parent.name : null;
-        if (parentAtRule === "media") return;
-        // Ignore light color scheme variables (same as defaults)
-        if (rule.selector?.includes("light")) return;
+      for (const [tokenName, tokenObject] of Object.entries(tokens)) {
+        // For now, only import colors.
+        if (!/color/gi.test(tokenName)) {
+          continue;
+        }
 
-        const isDark = rule.selector?.includes("dark");
+        parsedTokens[tokenName] = {
+          value: { ".": "placeholder" },
+          description: tokenObject.description,
+        };
 
-        rule.walkDecls((decl) => {
-          if (!decl.prop.startsWith(VAR_PREFIX)) return;
-          const value = decl.value.trim();
-          const parsed = parse(value);
-          const rgb =
-            parsed && !value.startsWith("var(") ? toRgb(parsed) : null;
+        for (const [modeName, modeValue] of Object.entries(tokenObject.value)) {
+          const typedModeName = modeName as keyof typeof tokenObject.value;
+          let computedModeValue: ParsedTokenValue[keyof ParsedTokenValue];
 
-          if (!(decl.prop in parsedTokens)) {
-            parsedTokens[decl.prop] = {
-              light: { value: "", rgb: undefined },
-              dark: { value: "", rgb: undefined },
+          if (modeValue.startsWith("{") && modeValue.endsWith("}")) {
+            // Preserve aliases
+            computedModeValue = modeValue;
+          } else if (/color/gi.test(tokenName)) {
+            const converted = rgb(modeValue);
+            if (!converted) {
+              console.warn(`Invalid color value: ${modeValue}`);
+              continue;
+            }
+
+            // Convert to RBG(A) object for Figma.
+            computedModeValue = {
+              r: Math.max(Math.min(converted.r, 1), 0),
+              g: Math.max(Math.min(converted.g, 1), 0),
+              b: Math.max(Math.min(converted.b, 1), 0),
+              a: converted.alpha ?? 1,
             };
           }
 
-          parsedTokens[decl.prop][isDark ? "dark" : "light"] = {
-            value,
-            rgb: rgb
-              ? {
-                  r: Math.max(Math.min(rgb.r, 1), 0),
-                  g: Math.max(Math.min(rgb.g, 1), 0),
-                  b: Math.max(Math.min(rgb.b, 1), 0),
-                }
-              : undefined,
-          };
-        });
-      });
+          if (!computedModeValue) {
+            console.log("Error: no computed value");
+            continue;
+          }
+
+          parsedTokens[tokenName].value[typedModeName] = computedModeValue;
+        }
+      }
 
       parent.postMessage(
         { pluginMessage: { type: "import-tokens", parsedTokens } },
@@ -77,11 +80,11 @@ function App() {
 
   return (
     <main>
-      <h2>DS Token Manager</h2>
+      <h2>DS Token Manager 3</h2>
 
       <section>
-        <label htmlFor="input">Select a CSS file</label>
-        <input id="input" type="file" ref={inputRef} />
+        <label htmlFor="input">Select a JSON file</label>
+        <input id="input" type="file" accept=".json" ref={inputRef} />
       </section>
       <footer>
         <button className="brand" onClick={onImport}>
