@@ -1,7 +1,7 @@
 {
-  "name": "react",
-  "version": "1.0.0",
-  "description": "react",
+  "name": "wpds-tokens-figma-plugin",
+  "version": "3.0.0",
+  "description": "WPDS Tokens Figma Plugin",
   "scripts": {
     "test": "npm run tsc && npm run build",
     "format": "prettier --write .",
