@@ -77,7 +77,7 @@ async function updateCollection(args: {
     // Update scopes
     console.log(tokenName);
     if (/color\/semantic\/foreground/gi.test(tokenName)) {
-      variable.scopes = ["TEXT_FILL", "SHAPE_FILL"];
+      variable.scopes = ["TEXT_FILL", "SHAPE_FILL", "STROKE_COLOR"];
     } else if (/color\/semantic\/stroke/gi.test(tokenName)) {
       variable.scopes = ["STROKE_COLOR", "EFFECT_COLOR"];
     } else if (/color\/semantic\/background/gi.test(tokenName)) {
