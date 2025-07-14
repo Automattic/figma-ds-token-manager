@@ -80,7 +80,9 @@ function App() {
 
   return (
     <main>
-      <h2>DS Token Manager 3</h2>
+      <h2>
+        WPDS Token Manager <small>(v4)</small>
+      </h2>
 
       <section>
         <label htmlFor="input">Select a JSON file</label>
