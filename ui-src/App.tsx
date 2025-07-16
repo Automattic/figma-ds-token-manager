@@ -81,7 +81,11 @@ function App() {
   return (
     <main>
       <h2>
-        WPDS Token Manager <small>(v4)</small>
+        WPDS
+        <br />
+        Token Manager
+        <br />
+        <small>(v5)</small>
       </h2>
 
       <section>
