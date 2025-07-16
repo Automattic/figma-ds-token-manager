@@ -71,11 +71,12 @@ async function updateCollection(args: {
 
     if (description) {
       variable.description = description;
+    } else {
+      variable.description = "";
     }
     variable.hiddenFromPublishing = /primitive/.test(tokenName);
 
     // Update scopes
-    console.log(tokenName);
     if (/color\/semantic\/foreground/gi.test(tokenName)) {
       variable.scopes = ["TEXT_FILL", "SHAPE_FILL", "STROKE_COLOR"];
     } else if (/color\/semantic\/stroke/gi.test(tokenName)) {
