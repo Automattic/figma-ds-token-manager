@@ -23,8 +23,8 @@ function App() {
       const parsedTokens: ParsedTokens = {};
 
       for (const [tokenName, tokenObject] of Object.entries(tokens)) {
-        // For now, only import colors.
-        if (!/color/gi.test(tokenName)) {
+        // Limit to supported token types
+        if (!/^(color|dimension)/gi.test(tokenName)) {
           continue;
         }
 
@@ -54,6 +54,13 @@ function App() {
               b: Math.max(Math.min(converted.b, 1), 0),
               a: converted.alpha ?? 1,
             };
+          } else if (/dimension/gi.test(tokenName)) {
+            if (!/px$/.test(modeValue)) {
+              console.warn(`Invalid dimension value: ${modeValue}`);
+              continue;
+            }
+
+            computedModeValue = Number(modeValue.replace("px", ""));
           }
 
           if (!computedModeValue) {

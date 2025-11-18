@@ -11,10 +11,10 @@ export interface RGBA {
   readonly a: number;
 }
 
-type ColorModes = "light" | "dark" | ".";
+type TokenMode = ".";
 
 export type ImportedTokenValue = {
-  [key in ColorModes]?: string;
+  [key in TokenMode]?: string;
 };
 
 export interface ImportedTokens {
@@ -25,7 +25,7 @@ export interface ImportedTokens {
 }
 
 export type ParsedTokenValue = {
-  [key in ColorModes]?: RGB | RGBA | string;
+  [key in TokenMode]?: RGB | RGBA | string | number;
 };
 export interface ParsedTokens {
   [key: string]: {

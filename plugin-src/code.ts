@@ -6,7 +6,8 @@ figma.showUI(__html__, { themeColors: true, height: 300 });
 // alias variables correctly.
 const allImportedVariables: Record<string, Variable> = {};
 
-const DEFAULT_COLOR_MODE = "light";
+const LEGACY_DEFAULT_MODE = "light";
+const DEFAULT_MODE = "default";
 
 function isAliasValue(
   value: ParsedTokenValue[keyof ParsedTokenValue]
@@ -19,6 +20,26 @@ function isAliasValue(
 function isValidColorValue(value: any): value is ParsedTokenValue {
   return (
     typeof value === "object" && "r" in value && "g" in value && "b" in value
+  );
+}
+
+function getResolvedType(value: any): VariableResolvedDataType | undefined {
+  if (isValidColorValue(value)) {
+    return "COLOR";
+  } else if (typeof value === "number") {
+    return "FLOAT";
+  }
+}
+
+function groupByCollection(tokens: ParsedTokens): Record<string, ParsedTokens> {
+  return Object.entries(tokens).reduce<Record<string, ParsedTokens>>(
+    (result, [tokenName, tokenData]) => {
+      const collection = tokenName.split("/")[0];
+      result[collection] = result[collection] || {};
+      result[collection][tokenName] = tokenData;
+      return result;
+    },
+    {}
   );
 }
 
@@ -48,6 +69,10 @@ async function updateCollection(args: {
 
   // Get existing modes in the collection
   for (const mode of collection.modes) {
+    if (mode.name === LEGACY_DEFAULT_MODE) {
+      collection.renameMode(mode.modeId, DEFAULT_MODE);
+    }
+
     modesInCollectionBeforeImporting[mode.name] = mode.modeId;
   }
 
@@ -64,9 +89,19 @@ async function updateCollection(args: {
 
     let variable = variablesInCollectionBeforeImporting[tokenName];
 
+    // Don't save variables where we can't determine the resolved type
+    const resolvedType = getResolvedType(value["."]);
+    if (!resolvedType) {
+      continue;
+    }
+
     if (!variable) {
       // Create new variable
-      variable = figma.variables.createVariable(tokenName, collection, "COLOR");
+      variable = figma.variables.createVariable(
+        tokenName,
+        collection,
+        resolvedType
+      );
     }
 
     if (description) {
@@ -83,12 +118,16 @@ async function updateCollection(args: {
       variable.scopes = ["STROKE_COLOR", "EFFECT_COLOR"];
     } else if (/color\/semantic\/background/gi.test(tokenName)) {
       variable.scopes = ["FRAME_FILL", "SHAPE_FILL"];
+    } else if (/dimension\/semantic\/(padding|gap)/gi.test(tokenName)) {
+      variable.scopes = ["GAP"];
+    } else if (/dimension\/semantic/gi.test(tokenName)) {
+      variable.scopes = ["WIDTH_HEIGHT"];
     } else {
       variable.scopes = [];
     }
 
     for (const [modeName, modeValue] of Object.entries(value)) {
-      const computedModeName = modeName === "." ? DEFAULT_COLOR_MODE : modeName;
+      const computedModeName = modeName === "." ? DEFAULT_MODE : modeName;
 
       if (!(computedModeName in modesInCollectionBeforeImporting)) {
         modesInCollectionBeforeImporting[computedModeName] =
@@ -98,10 +137,6 @@ async function updateCollection(args: {
 
       // First pass: only save non-aliased values
       if (isAliasValue(modeValue)) {
-        continue;
-      }
-
-      if (!isValidColorValue(modeValue)) {
         continue;
       }
 
@@ -115,51 +150,7 @@ async function updateCollection(args: {
     variablesUpdatedDuringImport[tokenName] = true;
   }
 
-  // Pass 2: create or update aliases
-  for (const [tokenName, tokenData] of Object.entries(tokens)) {
-    const { value } = tokenData;
-
-    const variable = allImportedVariables[tokenName];
-    if (!variable) {
-      console.log(
-        "Something is off — this variable should have already been created"
-      );
-      continue;
-    }
-
-    for (const [modeName, modeValue] of Object.entries(value)) {
-      const computedModeName = modeName === "." ? DEFAULT_COLOR_MODE : modeName;
-
-      if (!(computedModeName in modesInCollectionBeforeImporting)) {
-        console.log(
-          "Something is off — this mode should have already been created"
-        );
-        continue;
-      }
-
-      // Second pass: only save aliased values
-      if (!isAliasValue(modeValue)) {
-        continue;
-      }
-
-      const matchAliasTokenName = /^\{(.*)\}$/.exec(modeValue);
-      const aliasTokenName = matchAliasTokenName && matchAliasTokenName[1];
-
-      if (!aliasTokenName || !allImportedVariables[aliasTokenName]) {
-        continue;
-      }
-
-      variable.setValueForMode(
-        modesInCollectionBeforeImporting[computedModeName],
-        {
-          type: "VARIABLE_ALIAS",
-          id: allImportedVariables[aliasTokenName].id,
-        }
-      );
-    }
-  }
-
-  // Pass 3: fallback missing mode values to the default mode value
+  // Pass 2: fallback missing mode values to the default mode value
   for (const [tokenName, tokenData] of Object.entries(tokens)) {
     const { value } = tokenData;
 
@@ -174,7 +165,7 @@ async function updateCollection(args: {
     const modesMissingValues = new Set(collection.modes.map((m) => m.modeId));
 
     for (const [modeName] of Object.entries(value)) {
-      const computedModeName = modeName === "." ? DEFAULT_COLOR_MODE : modeName;
+      const computedModeName = modeName === "." ? DEFAULT_MODE : modeName;
 
       if (!(computedModeName in modesInCollectionBeforeImporting)) {
         console.log(
@@ -191,9 +182,7 @@ async function updateCollection(args: {
     for (const modeId of modesMissingValues) {
       variable.setValueForMode(
         modeId,
-        variable.valuesByMode[
-          modesInCollectionBeforeImporting[DEFAULT_COLOR_MODE]
-        ]
+        variable.valuesByMode[modesInCollectionBeforeImporting[DEFAULT_MODE]]
       );
     }
   }
@@ -220,11 +209,14 @@ async function updateCollection(args: {
 figma.ui.onmessage = async (msg) => {
   if (msg.type === "import-tokens") {
     const parsedTokens: ParsedTokens = msg.parsedTokens;
+    const groupedTokens = groupByCollection(parsedTokens);
 
-    await updateCollection({
-      tokens: parsedTokens,
-      collectionName: "WPDS Tokens",
-    });
+    for (const [collectionName, tokens] of Object.entries(groupedTokens)) {
+      await updateCollection({
+        tokens: tokens,
+        collectionName: `WPDS Tokens/${collectionName}`,
+      });
+    }
   }
 
   figma.closePlugin();
