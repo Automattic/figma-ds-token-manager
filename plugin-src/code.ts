@@ -150,7 +150,51 @@ async function updateCollection(args: {
     variablesUpdatedDuringImport[tokenName] = true;
   }
 
-  // Pass 2: fallback missing mode values to the default mode value
+  // Pass 2: create or update aliases
+  for (const [tokenName, tokenData] of Object.entries(tokens)) {
+    const { value } = tokenData;
+
+    const variable = allImportedVariables[tokenName];
+    if (!variable) {
+      console.log(
+        "Something is off — this variable should have already been created"
+      );
+      continue;
+    }
+
+    for (const [modeName, modeValue] of Object.entries(value)) {
+      const computedModeName = modeName === "." ? DEFAULT_MODE : modeName;
+
+      if (!(computedModeName in modesInCollectionBeforeImporting)) {
+        console.log(
+          "Something is off — this mode should have already been created"
+        );
+        continue;
+      }
+
+      // Second pass: only save aliased values
+      if (!isAliasValue(modeValue)) {
+        continue;
+      }
+
+      const matchAliasTokenName = /^\{(.*)\}$/.exec(modeValue);
+      const aliasTokenName = matchAliasTokenName && matchAliasTokenName[1];
+
+      if (!aliasTokenName || !allImportedVariables[aliasTokenName]) {
+        continue;
+      }
+
+      variable.setValueForMode(
+        modesInCollectionBeforeImporting[computedModeName],
+        {
+          type: "VARIABLE_ALIAS",
+          id: allImportedVariables[aliasTokenName].id,
+        }
+      );
+    }
+  }
+
+  // Pass 3: fallback missing mode values to the default mode value
   for (const [tokenName, tokenData] of Object.entries(tokens)) {
     const { value } = tokenData;
 
