@@ -112,15 +112,15 @@ async function updateCollection(args: {
     variable.hiddenFromPublishing = /primitive/.test(tokenName);
 
     // Update scopes
-    if (/color\/semantic\/foreground/gi.test(tokenName)) {
+    if (/color\/foreground/gi.test(tokenName)) {
       variable.scopes = ["TEXT_FILL", "SHAPE_FILL", "STROKE_COLOR"];
-    } else if (/color\/semantic\/stroke/gi.test(tokenName)) {
+    } else if (/color\/stroke/gi.test(tokenName)) {
       variable.scopes = ["STROKE_COLOR", "EFFECT_COLOR"];
-    } else if (/color\/semantic\/background/gi.test(tokenName)) {
+    } else if (/color\/background/gi.test(tokenName)) {
       variable.scopes = ["FRAME_FILL", "SHAPE_FILL"];
-    } else if (/dimension\/semantic\/(padding|gap)/gi.test(tokenName)) {
+    } else if (/dimension\/(padding|gap)/gi.test(tokenName)) {
       variable.scopes = ["GAP"];
-    } else if (/dimension\/semantic/gi.test(tokenName)) {
+    } else if (/dimension/gi.test(tokenName)) {
       variable.scopes = ["WIDTH_HEIGHT"];
     } else {
       variable.scopes = [];
