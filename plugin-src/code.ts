@@ -214,7 +214,7 @@ figma.ui.onmessage = async (msg) => {
     for (const [collectionName, tokens] of Object.entries(groupedTokens)) {
       await updateCollection({
         tokens: tokens,
-        collectionName: `WPDS Tokens/${collectionName}`,
+        collectionName: `WPDS ${collectionName}`,
       });
     }
   }
