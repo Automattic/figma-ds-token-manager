@@ -109,7 +109,6 @@ async function updateCollection(args: {
     } else {
       variable.description = "";
     }
-    variable.hiddenFromPublishing = /primitive/.test(tokenName);
 
     // Update scopes
     if (/color\/foreground/gi.test(tokenName)) {
