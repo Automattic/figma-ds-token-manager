@@ -6,7 +6,6 @@ figma.showUI(__html__, { themeColors: true, height: 300 });
 // alias variables correctly.
 const allImportedVariables: Record<string, Variable> = {};
 
-const LEGACY_DEFAULT_MODE = "light";
 const DEFAULT_MODE = "default";
 
 function isAliasValue(
@@ -69,10 +68,6 @@ async function updateCollection(args: {
 
   // Get existing modes in the collection
   for (const mode of collection.modes) {
-    if (mode.name === LEGACY_DEFAULT_MODE) {
-      collection.renameMode(mode.modeId, DEFAULT_MODE);
-    }
-
     modesInCollectionBeforeImporting[mode.name] = mode.modeId;
   }
 
@@ -111,11 +106,11 @@ async function updateCollection(args: {
     }
 
     // Update scopes
-    if (/color\/foreground/gi.test(tokenName)) {
+    if (/color\/fg/gi.test(tokenName)) {
       variable.scopes = ["TEXT_FILL", "SHAPE_FILL", "STROKE_COLOR"];
     } else if (/color\/stroke/gi.test(tokenName)) {
       variable.scopes = ["STROKE_COLOR", "EFFECT_COLOR"];
-    } else if (/color\/background/gi.test(tokenName)) {
+    } else if (/color\/bg/gi.test(tokenName)) {
       variable.scopes = ["FRAME_FILL", "SHAPE_FILL"];
     } else if (/dimension\/(padding|gap)/gi.test(tokenName)) {
       variable.scopes = ["GAP"];
@@ -257,7 +252,7 @@ figma.ui.onmessage = async (msg) => {
     for (const [collectionName, tokens] of Object.entries(groupedTokens)) {
       await updateCollection({
         tokens: tokens,
-        collectionName: `WPDS ${collectionName}`,
+        collectionName,
       });
     }
   }

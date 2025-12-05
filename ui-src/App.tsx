@@ -24,7 +24,7 @@ function App() {
 
       for (const [tokenName, tokenObject] of Object.entries(tokens)) {
         // Limit to supported token types
-        if (!/^(color|dimension)/gi.test(tokenName)) {
+        if (!/^wpds-(color|dimension)/gi.test(tokenName)) {
           continue;
         }
 
